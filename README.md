@@ -1,0 +1,1 @@
+# Projeto Busca usuário via QR Code e Messageria Celery
