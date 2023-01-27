@@ -1,11 +1,15 @@
 import os
 import cv2
+import multiprocessing
 from qrcode import make
 from typing import List
+from pathlib import Path
 from pyzbar import pyzbar
 from datetime import datetime
 
-from fastapi import APIRouter, status, Depends, HTTPException
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, status, Depends, HTTPException, File, UploadFile, Request, Header, Response
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +22,18 @@ from celery_app import send_email
 from celery.schedules import crontab
 
 
+
+templates = Jinja2Templates(directory="templates")
+CHUNK_SIZE = 1024*1024
+video_path = Path("video.mp4")
+
+
 router = APIRouter()
+
+@router.get("/")
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.htm", context={"request": request})
+
 
 @router.post("/schedule-message/")
 async def schedule_message():#to: str, subject: str, body: str, scheduled_time: str
@@ -78,4 +93,34 @@ async def scan_qr():
             break
     cap.release()
     cv2.destroyAllWindows()
+
+@router.get("/webcam")
+async def webcam():
+    process = multiprocessing.Process(target=webcam_process)
+    process.start()
+    return {"message": "Webcam aberta"}
     
+def webcam_process():
+    cap = cv2.VideoCapture(0)
+    ret, frame = cap.read()
+    if ret:
+        ret, buffer = cv2.imencode('.jpg', frame)
+        return StreamingResponse(buffer.tobytes(), media_type="image/jpeg")
+    else:
+        return "Webcam não encontrada"
+    
+
+@router.get("/video")
+async def video_endpoint(range: str = Header(None)):
+    start, end = range.replace("bytes=", "").split("-")
+    start = int(start)
+    end = int(end) if end else start + CHUNK_SIZE
+    with open(video_path, "rb") as video:
+        video.seek(start)
+        data = video.read(end - start)
+        filesize = str(video_path.stat().st_size)
+        headers = {
+            'Content-Range': f'bytes {str(start)}-{str(end)}/{filesize}',
+            'Accept-Ranges': 'bytes'
+        }
+        return Response(data, status_code=206, headers=headers, media_type="video/mp4")
