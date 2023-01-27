@@ -1,0 +1,7 @@
+*.bak
+*.dat
+*.dir
+build
+opencv
+venv
+__pycache__
